@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WC2026 — Anton · Sean · Abiram · Vivek · Alok · Abinan</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root {
   --navy: #0a0e1a;
@@ -19,6 +19,7 @@
   --blue: #3b82f6;
   --text: #e8eaf0;
   --muted: #8892a4;
+  --dim: #5a6478;
   --white: #ffffff;
   --pill-colors: #e74c3c,#3498db,#2ecc71,#f39c12,#9b59b6;
 }
@@ -220,6 +221,15 @@ body { background: var(--navy); color: var(--text); font-family: 'DM Sans', sans
   .draft-groups-grid { grid-template-columns: 1fr 1fr; }
   .groups-grid { grid-template-columns: 1fr; }
 }
+
+/* ── MONTE CARLO ── */
+.mc-mono { font-family: 'Space Mono', monospace; }
+.mc-prob-card { background: var(--card); border-radius: 8px; padding: 16px; text-align: center; position: relative; overflow: hidden; }
+.mc-h2h-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.mc-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.mc-grid-auto { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.mc-seed-input { background: var(--card2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: 'Space Mono', monospace; font-size: 13px; padding: 0 12px; width: 170px; outline: none; }
+.mc-seed-input:focus { border-color: var(--gold); }
 </style>
 </head>
 <body>
@@ -317,11 +327,12 @@ body { background: var(--navy); color: var(--text); font-family: 'DM Sans', sans
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
           <button onclick="runMC()" id="mc-run-btn" style="background:var(--gold);color:#060810;border:none;padding:12px 28px;font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:2px;cursor:pointer;border-radius:4px">▶ RUN 5000 SIMS</button>
           <button onclick="resetMC()" id="mc-reset-btn" style="display:none;background:transparent;color:var(--gold);border:1px solid var(--gold);padding:12px 20px;font-family:'Bebas Neue',sans-serif;font-size:16px;cursor:pointer;border-radius:4px">↺ RESET</button>
+          <input id="mc-seed" type="number" placeholder="seed (optional)" title="Enter a seed for a reproducible run, or leave blank for a random one" class="mc-seed-input">
         </div>
         <div id="mc-progress" style="display:none;margin-bottom:20px">
-          <div style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:2px;margin-bottom:6px">SIMULATING</div>
+          <div class="mc-mono" style="font-size:11px;color:var(--muted);letter-spacing:2px;margin-bottom:6px">SIMULATING</div>
           <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden"><div id="mc-prog-fill" style="height:100%;background:var(--gold);width:0%;transition:width .05s"></div></div>
-          <div id="mc-prog-count" style="font-family:'Space Mono',monospace;font-size:12px;color:var(--gold);margin-top:5px">0 / 5000</div>
+          <div id="mc-prog-count" class="mc-mono" style="font-size:12px;color:var(--gold);margin-top:5px">0 / 5000</div>
         </div>
       </div>
       <div id="mc-results" style="display:none">
@@ -1325,16 +1336,30 @@ const MC_GROUP_MATCHES = {
   L:[{h:'england',a:'croatia'},{h:'ghana',a:'panama'},{h:'england',a:'ghana'},{h:'croatia',a:'panama'},{h:'england',a:'panama'},{h:'croatia',a:'ghana'}],
 };
 
+// Seedable RNG (mulberry32) — set per run so results are reproducible.
+// Shared verbatim by the main thread and the Web Worker.
+function mcMakeRng(seed){
+  let s = seed >>> 0;
+  return function(){
+    s = (s + 0x6D2B79F5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let RNG = Math.random;                    // overwritten with a seeded generator on each run
+let REAL = { scores:{}, koScores:{} };    // entered results; main thread points this at live state
+
 function mcSimMatch(a,b){
-  const adjA=(MC_STRENGTH[a]||50)+(Math.random()*60-30);
-  const adjB=(MC_STRENGTH[b]||50)+(Math.random()*60-30);
+  const adjA=(MC_STRENGTH[a]||50)+(RNG()*60-30);
+  const adjB=(MC_STRENGTH[b]||50)+(RNG()*60-30);
   return adjA>=adjB?a:b;
 }
 
 // Parse a real score from state.scores — returns {winner, loser} or null if not played
 function getRealGroupResult(g, idx) {
   const key = g + '_' + idx;
-  const sc = state.scores[key];
+  const sc = REAL.scores[key];
   if (!sc || sc.h === '' || sc.a === '') return null;
   const hs = parseInt(sc.h), as = parseInt(sc.a);
   if (isNaN(hs) || isNaN(as)) return null;
@@ -1343,7 +1368,7 @@ function getRealGroupResult(g, idx) {
 
 // Parse a real knockout result from state.koScores
 function getRealKOResult(key) {
-  const sc = state.koScores[key];
+  const sc = REAL.koScores[key];
   if (!sc || sc.h === '' || sc.a === '') return null;
   const hs = parseInt(sc.h), as = parseInt(sc.a);
   if (isNaN(hs) || isNaN(as) || hs === as) return null;
@@ -1363,10 +1388,10 @@ function mcSimGroup(g) {
       hs = real.hs; as = real.as;
     } else {
       // Simulate
-      const sA = (MC_STRENGTH[m.h]||50)+(Math.random()*60-30);
-      const sB = (MC_STRENGTH[m.a]||50)+(Math.random()*60-30);
-      hs = Math.max(0, Math.round(sA/100*2.5+(Math.random()*2-.5)));
-      as = Math.max(0, Math.round(sB/100*2.5+(Math.random()*2-.5)));
+      const sA = (MC_STRENGTH[m.h]||50)+(RNG()*60-30);
+      const sB = (MC_STRENGTH[m.a]||50)+(RNG()*60-30);
+      hs = Math.max(0, Math.round(sA/100*2.5+(RNG()*2-.5)));
+      as = Math.max(0, Math.round(sB/100*2.5+(RNG()*2-.5)));
     }
     st[m.h].gf += hs; st[m.h].gd += hs - as;
     st[m.a].gf += as; st[m.a].gd += as - hs;
@@ -1381,6 +1406,8 @@ function mcRunSim() {
   const GROUPS = 'ABCDEFGHIJKL'.split('');
   const gr = {};
   GROUPS.forEach(g => { gr[g] = mcSimGroup(g); });
+  const goalsFor = {};
+  GROUPS.forEach(g => gr[g].forEach(t => { goalsFor[t.id] = t.gf; }));
 
   const thirds = GROUPS.map(g => ({
     id: gr[g][2].id, pts: gr[g][2].pts,
@@ -1448,42 +1475,108 @@ function mcRunSim() {
     });
     scores[p] = tot;
   });
-  // Goals bonus
+  // Goals bonus — based on the ACTUAL simulated group-stage goals each picked
+  // team scored (consistent with the scorelines above), not a separate RNG draw.
   const gp = {};
-  MC_PLAYERS.forEach(p => { gp[p] = MC_PICKS[p].reduce((s,id) => s+(MC_STRENGTH[id]||50)/100*3+(Math.random()*2), 0); });
+  MC_PLAYERS.forEach(p => { gp[p] = MC_PICKS[p].reduce((s,id) => s + (goalsFor[id]||0), 0); });
   const maxG = Math.max(...Object.values(gp));
   MC_PLAYERS.filter(p => gp[p]===maxG).forEach(p => { scores[p] += 3; });
   const maxS = Math.max(...MC_PLAYERS.map(p => scores[p]));
   const winners = MC_PLAYERS.filter(p => scores[p]===maxS);
-  const compWinner = winners[Math.floor(Math.random()*winners.length)];
-  return { scores, compWinner, stages: {
+  const compWinner = winners[Math.floor(RNG()*winners.length)];
+  return { scores, compWinner, champion: fin, stages: {
     spain:stage['spain'], france:stage['france'], portugal:stage['portugal'],
     england:stage['england'], argentina:stage['argentina'], brazil:stage['brazil'], germany:stage['germany'],
   }};
 }
 
 let mcResults = [];
+let mcLastSeed = 0;
+let mcWorkerURL = null;
 
-async function runMC() {
+// Build a Web Worker from the SAME engine functions (single source of truth) so
+// the heavy loop runs off the main thread and the UI stays responsive.
+function mcBuildWorkerURL(){
+  if (mcWorkerURL) return mcWorkerURL;
+  const data = `
+    const MC_N=${MC_N};
+    const MC_PLAYERS=${JSON.stringify(MC_PLAYERS)};
+    const MC_PICKS=${JSON.stringify(MC_PICKS)};
+    const MC_STRENGTH=${JSON.stringify(MC_STRENGTH)};
+    const MC_GROUP_OF=${JSON.stringify(MC_GROUP_OF)};
+    const MC_GROUP_MATCHES=${JSON.stringify(MC_GROUP_MATCHES)};
+    const STAGE_PTS=${JSON.stringify(STAGE_PTS)};
+    let RNG=Math.random, REAL={scores:{},koScores:{}};
+  `;
+  const fns = [mcMakeRng, mcSimMatch, getRealGroupResult, getRealKOResult, mcSimGroup, mcRunSim]
+    .map(f => f.toString()).join('\n');
+  const harness = `
+    onmessage = function(e){
+      const d = e.data; REAL = d.real; RNG = mcMakeRng(d.seed);
+      const out = [];
+      for (let i=0;i<d.n;i++){ out.push(mcRunSim()); if(i%250===0) postMessage({t:'p', i}); }
+      postMessage({t:'d', results: out});
+    };
+  `;
+  mcWorkerURL = URL.createObjectURL(new Blob([data, fns, harness], { type:'application/javascript' }));
+  return mcWorkerURL;
+}
+
+async function runMC(){
+  const seedInput = document.getElementById('mc-seed');
+  const seed = (seedInput && seedInput.value !== '')
+    ? (parseInt(seedInput.value, 10) >>> 0)
+    : (Math.random() * 4294967296 >>> 0);
+  mcLastSeed = seed;
+  if (seedInput) seedInput.value = seed;            // surface the seed used → reproducible
+  const real = { scores: state.scores, koScores: state.koScores };
+
   document.getElementById('mc-run-btn').disabled = true;
+  document.getElementById('mc-reset-btn').style.display = 'none';
+  document.getElementById('mc-results').style.display = 'none';
   document.getElementById('mc-progress').style.display = 'block';
-  mcResults = [];
   const fill = document.getElementById('mc-prog-fill');
   const cnt  = document.getElementById('mc-prog-count');
-  for (let i = 0; i < MC_N; i++) {
-    mcResults.push(mcRunSim());
-    if (i % 25 === 0) {
-      fill.style.width = ((i/MC_N)*100) + '%';
-      cnt.textContent = `${i} / ${MC_N}`;
-      await new Promise(r => setTimeout(r, 0));
+  const setProg = i => { fill.style.width = ((i/MC_N)*100) + '%'; cnt.textContent = `${i} / ${MC_N}`; };
+  setProg(0);
+
+  const finish = () => {
+    fill.style.width = '100%'; cnt.textContent = `${MC_N} / ${MC_N}`;
+    setTimeout(() => {
+      document.getElementById('mc-progress').style.display = 'none';
+      document.getElementById('mc-results').style.display = 'block';
+      document.getElementById('mc-reset-btn').style.display = 'inline-block';
+      document.getElementById('mc-run-btn').disabled = false;
+      renderMC();
+    }, 120);
+  };
+
+  let started = false;
+  try {
+    if (typeof Worker !== 'undefined') {
+      const worker = new Worker(mcBuildWorkerURL());
+      started = true;
+      worker.onmessage = ev => {
+        const m = ev.data;
+        if (m.t === 'p') setProg(m.i);
+        else if (m.t === 'd') { mcResults = m.results; worker.terminate(); finish(); }
+      };
+      worker.onerror = () => { worker.terminate(); runMCMainThread(seed, real, setProg, finish); };
+      worker.postMessage({ seed, real, n: MC_N });
     }
+  } catch(e) { started = false; }
+
+  if (!started) await runMCMainThread(seed, real, setProg, finish);
+}
+
+// Fallback: chunked loop on the main thread (Workers unavailable/blocked).
+async function runMCMainThread(seed, real, setProg, finish){
+  RNG = mcMakeRng(seed); REAL = real; mcResults = [];
+  for (let i = 0; i < MC_N; i++){
+    mcResults.push(mcRunSim());
+    if (i % 100 === 0){ setProg(i); await new Promise(r => setTimeout(r, 0)); }
   }
-  fill.style.width = '100%'; cnt.textContent = `${MC_N} / ${MC_N}`;
-  await new Promise(r => setTimeout(r, 150));
-  document.getElementById('mc-progress').style.display = 'none';
-  document.getElementById('mc-results').style.display = 'block';
-  document.getElementById('mc-reset-btn').style.display = 'inline-block';
-  renderMC();
+  finish();
 }
 
 function renderMC() {
@@ -1505,20 +1598,20 @@ function renderMC() {
 
   // ── Win probability cards ──
   document.getElementById('mc-prob-grid').innerHTML =
-    `<div style="grid-column:1/-1;font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-bottom:4px">
+    `<div class="mc-mono" style="grid-column:1/-1;font-size:11px;color:var(--muted);margin-bottom:4px">
       Using ${gamesEntered} real group scores + ${koEntered} knockout results as fixed inputs. Remaining games simulated.
     </div>` +
     sorted.map((p, rank) => {
       const pct = (wins[p]/MC_N*100).toFixed(1);
-      return `<div style="background:var(--card);border:1px solid ${rank===0?MC_COLORS[p]:'var(--border)'};border-radius:8px;padding:16px;text-align:center;position:relative;overflow:hidden">
+      return `<div class="mc-prob-card" style="border:1px solid ${rank===0?MC_COLORS[p]:'var(--border)'}">
         <div style="position:absolute;bottom:0;left:0;right:0;height:3px;background:${MC_COLORS[p]}"></div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:2px;color:${MC_COLORS[p]};margin-bottom:8px">${MC_LABELS[p]}</div>
         <div style="font-family:'Bebas Neue',sans-serif;font-size:38px;line-height:1;margin-bottom:2px">${pct}%</div>
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Win Rate</div>
-        <div style="height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:8px">
+        <div class="mc-bar" style="margin-bottom:8px">
           <div style="height:100%;background:${MC_COLORS[p]};width:${pct}%;transition:width .8s"></div>
         </div>
-        <div style="font-family:'Space Mono',monospace;font-size:10px;color:var(--dim)">
+        <div class="mc-mono" style="font-size:10px;color:var(--dim)">
           avg: <span style="color:var(--gold)">${avg(p)}</span> · max: <span style="color:var(--gold)">${Math.max(...allScores[p])}</span>
         </div>
       </div>`;
@@ -1540,13 +1633,13 @@ function renderMC() {
     });
   });
   document.getElementById('mc-h2h').innerHTML =
-    `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">` +
+    `<div class="mc-grid-auto">` +
     pairs.map(([a,b]) => {
       const rec = h2h[`${a}_${b}`];
       const aPct = (rec.a/MC_N*100).toFixed(0);
       const bPct = (rec.b/MC_N*100).toFixed(0);
       const aWins = parseInt(aPct) > parseInt(bPct);
-      return `<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px">
+      return `<div class="mc-h2h-card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <span style="font-size:12px;font-weight:700;color:${MC_COLORS[a]}">${MC_LABELS[a]}</span>
           <span style="font-family:'Bebas Neue',sans-serif;font-size:18px;color:var(--gold)">${Math.round(rec.a)}–${Math.round(rec.b)}</span>
@@ -1556,24 +1649,30 @@ function renderMC() {
           <div style="width:${aPct}%;background:${MC_COLORS[a]};transition:width .8s"></div>
           <div style="width:${bPct}%;background:${MC_COLORS[b]};transition:width .8s"></div>
         </div>
-        <div style="display:flex;justify-content:space-between;margin-top:4px;font-family:'Space Mono',monospace;font-size:10px">
+        <div class="mc-mono" style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px">
           <span style="color:${aWins?'var(--green)':'var(--muted)'}">${aPct}%</span>
           <span style="color:${!aWins?'var(--green)':'var(--muted)'}">${bPct}%</span>
         </div>
       </div>`;
     }).join('') + `</div>`;
 
-  // ── Insights ──
-  const spainWins = mcResults.filter(r=>r.stages.spain==='winner').length;
-  const portWins  = mcResults.filter(r=>r.stages.portugal==='winner').length;
-  const fraWins   = mcResults.filter(r=>r.stages.france==='winner').length;
-  const engWins   = mcResults.filter(r=>r.stages.england==='winner').length;
+  // ── Insights (champions derived dynamically; no hardcoded teams) ──
+  const champCounts = {};
+  mcResults.forEach(r => { champCounts[r.champion] = (champCounts[r.champion]||0) + 1; });
+  const teamName = id => id ? id.charAt(0).toUpperCase()+id.slice(1) : '—';
+  const ownerOf  = id => { const pl = MC_PLAYERS.find(x => MC_PICKS[x].includes(id)); return pl ? MC_LABELS[pl] : null; };
+  const champLine = Object.keys(champCounts)
+    .sort((a,b)=>champCounts[b]-champCounts[a]).slice(0,5)
+    .map(id => { const o = ownerOf(id);
+      return `${teamName(id)} <strong style="color:var(--gold)">${champCounts[id]}</strong>${o?` <span style="color:var(--muted)">(${o})</span>`:''}`; })
+    .join(' · ');
   const top = sorted[0];
   document.getElementById('mc-insights').innerHTML = `
     <div style="margin-bottom:8px">→ <strong style="color:${MC_COLORS[top]}">${MC_LABELS[top]}</strong> leads with <strong style="color:var(--gold)">${(wins[top]/MC_N*100).toFixed(1)}%</strong> across ${MC_N} simulations.</div>
-    <div style="margin-bottom:8px">→ World Cup winner: Spain <strong style="color:var(--gold)">${spainWins}</strong> · France <strong style="color:var(--gold)">${fraWins}</strong> · Portugal <strong style="color:var(--gold)">${portWins}</strong> · England <strong style="color:var(--gold)">${engWins}</strong> times.</div>
+    <div style="margin-bottom:8px">→ Most frequent champions: ${champLine}.</div>
     <div style="margin-bottom:8px">→ Average points: ${MC_PLAYERS.map(p=>`<span style="color:${MC_COLORS[p]}">${MC_LABELS[p]}: ${avg(p)}</span>`).join(' · ')}</div>
-    <div>→ Best score: ${MC_PLAYERS.map(p=>`<span style="color:${MC_COLORS[p]}">${MC_LABELS[p]}: ${Math.max(...allScores[p])}</span>`).join(' · ')}</div>
+    <div style="margin-bottom:8px">→ Best score: ${MC_PLAYERS.map(p=>`<span style="color:${MC_COLORS[p]}">${MC_LABELS[p]}: ${Math.max(...allScores[p])}</span>`).join(' · ')}</div>
+    <div class="mc-mono" style="font-size:11px;color:var(--dim)">→ seed <span style="color:var(--gold)">${mcLastSeed}</span> — re-enter it above to reproduce this exact run.</div>
   `;
 }
 
@@ -1584,6 +1683,14 @@ function resetMC() {
   document.getElementById('mc-run-btn').disabled = false;
   document.getElementById('mc-prog-fill').style.width = '0%';
 }
+
+// Keep visible labels in sync with MC_N (single source of truth).
+(function(){
+  const btn = document.getElementById('mc-run-btn'); if (btn) btn.textContent = `▶ RUN ${MC_N} SIMS`;
+  const cnt = document.getElementById('mc-prog-count'); if (cnt) cnt.textContent = `0 / ${MC_N}`;
+  const p = document.querySelector('#tab-montecarlo p');
+  if (p) p.textContent = `Run ${MC_N} simulated tournaments with \u00b130 match noise, off the main thread. Uses the same points system and your exact picks.`;
+})();
 </script>
 </body>
 </html>
