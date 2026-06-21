@@ -230,6 +230,24 @@ body { background: var(--navy); color: var(--text); font-family: 'DM Sans', sans
 .mc-grid-auto { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
 .mc-seed-input { background: var(--card2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: 'Space Mono', monospace; font-size: 13px; padding: 0 12px; width: 170px; outline: none; }
 .mc-seed-input:focus { border-color: var(--gold); }
+
+.nav-btn { background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 6px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; font-family: 'DM Sans', sans-serif; transition: all .2s; }
+.nav-btn:hover { border-color: var(--gold); color: var(--gold); }
+.nav-btn-group { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── LIVE SCORES MODAL ── */
+.lv-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+.lv-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; width: min(560px, 95vw); max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+.lv-head { font-family: 'Bebas Neue', sans-serif; font-size: 22px; color: var(--gold); letter-spacing: 2px; padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+.lv-close { cursor: pointer; color: var(--muted); font-size: 16px; }
+.lv-sub { padding: 12px 20px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.lv-list { overflow-y: auto; padding: 0 20px; }
+.lv-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+.lv-cb { width: 16px; height: 16px; accent-color: var(--gold); flex-shrink: 0; }
+.lv-fx { flex: 1; font-size: 14px; }
+.lv-date { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--dim); }
+.lv-empty { padding: 20px 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.lv-actions { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
 </style>
 </head>
 <body>
@@ -314,7 +332,14 @@ body { background: var(--navy); color: var(--text); font-family: 'DM Sans', sans
       <div class="nav-tab" onclick="showTab('knockout')">Knockout</div>
       <div class="nav-tab" onclick="showTab('montecarlo')">🎲 Simulator</div>
     </div>
-    <button onclick="resetScores()" style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:11px;padding:6px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;font-family:'DM Sans',sans-serif;" title="Clear all saved scores">↺ Reset</button>
+    <div class="nav-btn-group">
+      <button onclick="fetchLiveScores()" id="live-btn" class="nav-btn" title="Pull real World Cup results from the web (you choose which to apply)">🌐 Live</button>
+      <button onclick="exportScores()" class="nav-btn" title="Download a backup file of all entered results">💾 Backup</button>
+      <button onclick="importScores()" class="nav-btn" title="Load results from a backup file">📂 Restore</button>
+      <button onclick="shareScores()" class="nav-btn" title="Copy a link that loads these results on any device">🔗 Link</button>
+      <button onclick="resetScores()" class="nav-btn" title="Clear all saved scores">↺ Reset</button>
+    </div>
+    <input type="file" id="import-file" accept="application/json,.json" style="display:none" onchange="handleImportFile(event)">
   </nav>
   <div class="app-content">
     <div id="tab-leaderboard" class="tab-content active"></div>
@@ -380,7 +405,7 @@ const ALL_TEAMS = [
   {id:'qatar',name:'Qatar',flag:'🇶🇦',group:'B'},
   {id:'brazil',name:'Brazil',flag:'🇧🇷',group:'C'},
   {id:'morocco',name:'Morocco',flag:'🇲🇦',group:'C'},
-  {id:'scotland',name:'Scotland',flag:'🏴󠁧󠁢󠁳󠁣󠁴󠁿',group:'C'},
+  {id:'scotland',name:'Scotland',flag:'🇬🇧',group:'C'},
   {id:'haiti',name:'Haiti',flag:'🇭🇹',group:'C'},
   {id:'turkey',name:'Türkiye',flag:'🇹🇷',group:'D'},
   {id:'usa',name:'USA',flag:'🇺🇸',group:'D'},
@@ -414,7 +439,7 @@ const ALL_TEAMS = [
   {id:'colombia',name:'Colombia',flag:'🇨🇴',group:'K'},
   {id:'uzbekistan',name:'Uzbekistan',flag:'🇺🇿',group:'K'},
   {id:'drcongo',name:'DR Congo',flag:'🇨🇩',group:'K'},
-  {id:'england',name:'England',flag:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',group:'L'},
+  {id:'england',name:'England',flag:'🇬🇧',group:'L'},
   {id:'ghana',name:'Ghana',flag:'🇬🇭',group:'L'},
   {id:'croatia',name:'Croatia',flag:'🇭🇷',group:'L'},
   {id:'panama',name:'Panama',flag:'🇵🇦',group:'L'},
@@ -1207,6 +1232,176 @@ function loadScores() {
   } catch(e) { console.warn('Load failed', e); }
 }
 
+// ── BACKUP / RESTORE / SHARE — move results between devices, keep a hard copy ──
+function exportScores() {
+  const payload = { app:'wc2026-group2', v:1, ts:Date.now(), scores:state.scores, koScores:state.koScores };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'wc2026-results-' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function importScores() {
+  const inp = document.getElementById('import-file');
+  if (inp) { inp.value = ''; inp.click(); }
+}
+
+function handleImportFile(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { applyImported(JSON.parse(reader.result)); alert('Results restored from backup.'); }
+    catch(e) { alert('Could not read that file - is it a wc2026 backup (.json)?'); }
+  };
+  reader.readAsText(file);
+}
+
+function applyImported(data) {
+  if (data && data.scores)   state.scores   = data.scores;
+  if (data && data.koScores) state.koScores = data.koScores;
+  saveScores();
+  renderApp();
+}
+
+// Encode/decode the current results into a compact, URL-safe string (unicode-safe).
+function encodeState() {
+  const json = JSON.stringify({ scores:state.scores, koScores:state.koScores });
+  return encodeURIComponent(btoa(unescape(encodeURIComponent(json))));
+}
+function decodeState(str) {
+  return JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(str)))));
+}
+
+function shareScores() {
+  const url = location.origin + location.pathname + '#data=' + encodeState();
+  location.hash = 'data=' + encodeState();   // also goes in the address bar -> bookmarkable
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(
+      () => alert('Shareable link copied. Open it on any device to load these exact results.'),
+      () => prompt('Copy this link:', url)
+    );
+  } else {
+    prompt('Copy this link:', url);
+  }
+}
+
+// If the page was opened via a shared #data= link, load those results (takes
+// precedence over the local copy) and persist them on this device too.
+function loadFromHash() {
+  try {
+    const m = (location.hash || '').match(/data=([^&]+)/);
+    if (!m) return false;
+    const d = decodeState(m[1]);
+    if (d && d.scores)   state.scores   = d.scores;
+    if (d && d.koScores) state.koScores = d.koScores;
+    saveScores();
+    return true;
+  } catch(e) { console.warn('Shared-link load failed', e); return false; }
+}
+
+// ═══════════════════════════════════════════════
+// LIVE SCORES — TheSportsDB (free, no key needed). Pulls real WC2026 results;
+// you preview and choose which to apply, and can always edit by hand after.
+// ═══════════════════════════════════════════════
+const TSDB_KEY = '3';                 // free public test key; swap if rate-limited
+const TSDB_WC_LEAGUE = '4429';        // FIFA World Cup
+const TSDB_SEASON = '2026';
+const TSDB_NAME = {
+  mexico:'Mexico', czechia:'Czech Republic', korea:'South Korea', southafrica:'South Africa',
+  switzerland:'Switzerland', canada:'Canada', qatar:'Qatar', bosnia:'Bosnia-Herzegovina',
+  brazil:'Brazil', morocco:'Morocco', scotland:'Scotland', haiti:'Haiti',
+  turkey:'Turkey', usa:'USA', australia:'Australia', paraguay:'Paraguay',
+  germany:'Germany', ecuador:'Ecuador', cotedivoire:'Ivory Coast', curacao:'Curacao',
+  netherlands:'Netherlands', japan:'Japan', sweden:'Sweden', tunisia:'Tunisia',
+  belgium:'Belgium', iran:'Iran', egypt:'Egypt', newzealand:'New Zealand',
+  spain:'Spain', uruguay:'Uruguay', saudiarabia:'Saudi Arabia', caboverde:'Cape Verde',
+  france:'France', senegal:'Senegal', norway:'Norway', iraq:'Iraq',
+  argentina:'Argentina', austria:'Austria', algeria:'Algeria', jordan:'Jordan',
+  portugal:'Portugal', colombia:'Colombia', drcongo:'DR Congo', uzbekistan:'Uzbekistan',
+  england:'England', croatia:'Croatia', ghana:'Ghana', panama:'Panama',
+};
+
+let liveFound = null;
+
+function liveNorm(x){ return (x||'').toLowerCase().normalize('NFD').replace(/[^a-z]/g,''); }
+function liveTeamLabel(id){ const t = ALL_TEAMS.find(x => x.id === id); return t ? (t.flag + ' ' + t.name) : id; }
+
+async function fetchLiveScores(){
+  const btn = document.getElementById('live-btn');
+  const old = btn ? btn.textContent : '';
+  if (btn){ btn.disabled = true; btn.textContent = '⏳ Fetching…'; }
+  try {
+    const url = `https://www.thesportsdb.com/api/v1/json/${TSDB_KEY}/eventsseason.php?id=${TSDB_WC_LEAGUE}&s=${TSDB_SEASON}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const events = (data.events || []).filter(e =>
+      e.intHomeScore != null && e.intHomeScore !== '' && e.intAwayScore != null && e.intAwayScore !== '');
+    const byPair = {};
+    events.forEach(e => { byPair[liveNorm(e.strHomeTeam) + '|' + liveNorm(e.strAwayTeam)] = e; });
+
+    const rows = [];
+    Object.keys(MC_GROUP_MATCHES).forEach(g => MC_GROUP_MATCHES[g].forEach((m, idx) => {
+      const hN = TSDB_NAME[m.h], aN = TSDB_NAME[m.a];
+      if (!hN || !aN) return;
+      const hn = liveNorm(hN), an = liveNorm(aN);
+      let ev = byPair[hn + '|' + an], flip = false;
+      if (!ev && byPair[an + '|' + hn]) { ev = byPair[an + '|' + hn]; flip = true; }
+      if (!ev) return;
+      rows.push({ key: g + '_' + idx, h: m.h, a: m.a,
+        hs: String(flip ? ev.intAwayScore : ev.intHomeScore),
+        as: String(flip ? ev.intHomeScore : ev.intAwayScore),
+        date: ev.dateEvent });
+    }));
+    liveFound = rows;
+    showLivePreview(rows, events.length);
+  } catch(err){
+    alert('Could not reach the live-scores source (' + ((err && err.message) || err) + ').\n\n'
+        + 'This can happen if you are offline or the source is rate-limiting. Manual entry works as normal.');
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+function showLivePreview(rows, totalEvents){
+  const old = document.getElementById('live-modal'); if (old) old.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'live-modal'; wrap.className = 'lv-overlay';
+  wrap.addEventListener('click', e => { if (e.target === wrap) wrap.remove(); });
+  const list = rows.length
+    ? rows.map((r,i) => `<label class="lv-row">
+        <input type="checkbox" class="lv-cb" data-i="${i}" checked>
+        <span class="lv-fx">${liveTeamLabel(r.h)} <strong style="color:var(--gold)">${r.hs}–${r.as}</strong> ${liveTeamLabel(r.a)}</span>
+        <span class="lv-date">${r.date || ''}</span>
+      </label>`).join('')
+    : `<div class="lv-empty">No published World Cup results match your fixtures yet.${totalEvents ? ` The source currently has ${totalEvents} result${totalEvents>1?'s':''} live, and updates as more matches are entered.` : ' The source has no results entered yet — check back after more matches are played.'}</div>`;
+  wrap.innerHTML = `<div class="lv-card">
+    <div class="lv-head">🌐 Live results<span class="lv-close" onclick="document.getElementById('live-modal').remove()">✕</span></div>
+    <div class="lv-sub">${rows.length ? `Found <strong style="color:var(--text)">${rows.length}</strong> result${rows.length===1?'':'s'} that map to your fixtures. Tick the ones to apply — you can still edit any score by hand afterwards.` : 'Nothing to apply right now.'}</div>
+    <div class="lv-list">${list}</div>
+    <div class="lv-actions">
+      ${rows.length ? `<button class="btn-primary" style="width:auto;padding:10px 20px;font-size:14px" onclick="applyLiveSelected()">Apply selected</button>` : ''}
+      <button class="nav-btn" onclick="document.getElementById('live-modal').remove()">Close</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+}
+
+function applyLiveSelected(){
+  const modal = document.getElementById('live-modal');
+  if (!modal || !liveFound) return;
+  let n = 0;
+  modal.querySelectorAll('.lv-cb').forEach(cb => {
+    if (cb.checked){ const r = liveFound[+cb.dataset.i]; setScore(r.key,'h',r.hs); setScore(r.key,'a',r.as); n++; }
+  });
+  modal.remove();
+  showTab('groups');
+  alert(n + ' result' + (n===1?'':'s') + ' applied from the web. Edit any of them by hand if you need to.');
+}
+
 // ═══════════════════════════════════════════════
 // EVENTS
 // ═══════════════════════════════════════════════
@@ -1275,6 +1470,7 @@ function showScreen(id) {
 // ═══════════════════════════════════════════════
 (function init() {
   loadScores();
+  loadFromHash();
   showScreen('points-screen');
 })();
 // ═══════════════════════════════════════════════
