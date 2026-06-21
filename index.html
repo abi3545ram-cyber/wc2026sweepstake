@@ -1309,6 +1309,8 @@ function loadFromHash() {
 const TSDB_KEY = '3';                 // free public test key; swap if rate-limited
 const TSDB_WC_LEAGUE = '4429';        // FIFA World Cup
 const TSDB_SEASON = '2026';
+const TSDB_START = '2026-06-11';   // tournament first match
+const TSDB_END   = '2026-07-19';   // final
 const TSDB_NAME = {
   mexico:'Mexico', czechia:'Czech Republic', korea:'South Korea', southafrica:'South Africa',
   switzerland:'Switzerland', canada:'Canada', qatar:'Qatar', bosnia:'Bosnia-Herzegovina',
@@ -1324,24 +1326,53 @@ const TSDB_NAME = {
   england:'England', croatia:'Croatia', ghana:'Ghana', panama:'Panama',
 };
 
-let liveFound = null;
+let liveFound = null, liveEvents = null, liveByPair = null, liveScan = null;
 
 function liveNorm(x){ return (x||'').toLowerCase().normalize('NFD').replace(/[^a-z]/g,''); }
 function liveTeamLabel(id){ const t = ALL_TEAMS.find(x => x.id === id); return t ? (t.flag + ' ' + t.name) : id; }
+function tsdbYMD(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function livePairKey(aN,bN){ return [liveNorm(aN), liveNorm(bN)].sort().join('~'); }
+function liveLookup(hId, aId){
+  const hN = TSDB_NAME[hId], aN = TSDB_NAME[aId];
+  if (!hN || !aN || !liveByPair) return null;
+  const hn = liveNorm(hN), an = liveNorm(aN);
+  if (liveByPair[hn + '|' + an]) return { ev: liveByPair[hn + '|' + an], flip: false };
+  if (liveByPair[an + '|' + hn]) return { ev: liveByPair[an + '|' + hn], flip: true };
+  return null;
+}
 
 async function fetchLiveScores(){
   const btn = document.getElementById('live-btn');
   const old = btn ? btn.textContent : '';
   if (btn){ btn.disabled = true; btn.textContent = '⏳ Fetching…'; }
   try {
-    const url = `https://www.thesportsdb.com/api/v1/json/${TSDB_KEY}/eventsseason.php?id=${TSDB_WC_LEAGUE}&s=${TSDB_SEASON}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const events = (data.events || []).filter(e =>
+    // The season endpoint truncates on the free tier, so we scan day-by-day
+    // across the tournament window and merge every match that has been played.
+    const startD = new Date(TSDB_START + 'T12:00:00');
+    let endD = new Date();                              // today (local time)
+    const finalD = new Date(TSDB_END + 'T12:00:00');
+    if (endD > finalD) endD = finalD;
+    if (endD < startD) endD = startD;
+    const dates = [];
+    for (let c = new Date(startD); tsdbYMD(c) <= tsdbYMD(endD); c.setDate(c.getDate() + 1)) dates.push(tsdbYMD(c));
+
+    const seen = {};
+    let okDays = 0;
+    for (let i = 0; i < dates.length; i++) {
+      if (btn) btn.textContent = `⏳ ${i + 1}/${dates.length}`;
+      try {
+        const r = await fetch(`https://www.thesportsdb.com/api/v1/json/${TSDB_KEY}/eventsday.php?d=${dates[i]}&l=${TSDB_WC_LEAGUE}`);
+        if (r.ok) { const j = await r.json(); (j.events || []).forEach(e => { seen[e.idEvent] = e; }); okDays++; }
+      } catch(e) { /* skip this day, keep going */ }
+      await new Promise(res => setTimeout(res, 80));    // gentle on the free API
+    }
+    if (okDays === 0) throw new Error('could not reach the source');
+    const events = Object.values(seen).filter(e =>
       e.intHomeScore != null && e.intHomeScore !== '' && e.intAwayScore != null && e.intAwayScore !== '');
     const byPair = {};
     events.forEach(e => { byPair[liveNorm(e.strHomeTeam) + '|' + liveNorm(e.strAwayTeam)] = e; });
+    liveEvents = events; liveByPair = byPair;
+    liveScan = { from: dates[0], to: dates[dates.length-1], days: dates.length, total: events.length };
 
     const rows = [];
     Object.keys(MC_GROUP_MATCHES).forEach(g => MC_GROUP_MATCHES[g].forEach((m, idx) => {
@@ -1357,7 +1388,7 @@ async function fetchLiveScores(){
         date: ev.dateEvent });
     }));
     liveFound = rows;
-    showLivePreview(rows, events.length);
+    showLivePreview(rows);
   } catch(err){
     alert('Could not reach the live-scores source (' + ((err && err.message) || err) + ').\n\n'
         + 'This can happen if you are offline or the source is rate-limiting. Manual entry works as normal.');
@@ -1366,7 +1397,8 @@ async function fetchLiveScores(){
   }
 }
 
-function showLivePreview(rows, totalEvents){
+function showLivePreview(rows){
+  const totalEvents = liveScan ? liveScan.total : 0;
   const old = document.getElementById('live-modal'); if (old) old.remove();
   const wrap = document.createElement('div');
   wrap.id = 'live-modal'; wrap.className = 'lv-overlay';
@@ -1382,6 +1414,11 @@ function showLivePreview(rows, totalEvents){
     <div class="lv-head">🌐 Live results<span class="lv-close" onclick="document.getElementById('live-modal').remove()">✕</span></div>
     <div class="lv-sub">${rows.length ? `Found <strong style="color:var(--text)">${rows.length}</strong> result${rows.length===1?'':'s'} that map to your fixtures. Tick the ones to apply — you can still edit any score by hand afterwards.` : 'Nothing to apply right now.'}</div>
     <div class="lv-list">${list}</div>
+    <label class="lv-row" style="border:none;padding:12px 0 2px">
+      <input type="checkbox" id="lv-ko" checked>
+      <span class="lv-fx">Also auto-fill <strong>knockout</strong> results from the web (once those games are played)</span>
+    </label>
+    <div class="lv-sub" style="padding:2px 0 0">Scanned ${liveScan ? `${liveScan.from} → ${liveScan.to}` : 'tournament dates'} · ${totalEvents} match${totalEvents===1?'':'es'} published online so far.</div>
     <div class="lv-actions">
       ${rows.length ? `<button class="btn-primary" style="width:auto;padding:10px 20px;font-size:14px" onclick="applyLiveSelected()">Apply selected</button>` : ''}
       <button class="nav-btn" onclick="document.getElementById('live-modal').remove()">Close</button>
@@ -1393,13 +1430,81 @@ function showLivePreview(rows, totalEvents){
 function applyLiveSelected(){
   const modal = document.getElementById('live-modal');
   if (!modal || !liveFound) return;
-  let n = 0;
+  const koWanted = modal.querySelector('#lv-ko') ? modal.querySelector('#lv-ko').checked : true;
+  let g = 0;
   modal.querySelectorAll('.lv-cb').forEach(cb => {
-    if (cb.checked){ const r = liveFound[+cb.dataset.i]; setScore(r.key,'h',r.hs); setScore(r.key,'a',r.as); n++; }
+    if (cb.checked){ const r = liveFound[+cb.dataset.i]; setScore(r.key,'h',r.hs); setScore(r.key,'a',r.as); g++; }
   });
   modal.remove();
+  let ko = { filled: 0, pens: 0 };
+  if (koWanted) { renderKnockout(); ko = fillKnockoutFromWeb(); }
+  renderApp();
+  const unplaced = liveEvents ? liveUnplaced() : [];
   showTab('groups');
-  alert(n + ' result' + (n===1?'':'s') + ' applied from the web. Edit any of them by hand if you need to.');
+  if (unplaced.length) { showUnplaced(unplaced, g, ko); }
+  else {
+    alert(`Applied ${g} group result${g===1?'':'s'}` + (ko.filled ? ` + ${ko.filled} knockout` : '') + ' from the web.'
+      + (ko.pens ? `\n\n${ko.pens} knockout tie(s) went to penalties \u2014 set the winner by hand in the Knockout tab.` : '')
+      + '\n\nEdit any score by hand if you need to.');
+  }
+}
+
+// Walk the bracket round by round: each round, let the app derive who is in each
+// slot from the previous round's winners, then look up the real result online.
+function fillKnockoutFromWeb(){
+  const rounds = [['r32',16],['r16',8],['qf',4],['sf',2],['final',1]];
+  let filled = 0, pens = 0;
+  rounds.forEach(([prefix, count]) => {
+    renderKnockout();                       // populate ht/at for this round
+    for (let i = 0; i < count; i++) {
+      const key = prefix === 'final' ? 'final_0' : `${prefix}_${i}`;
+      const sc = state.koScores[key];
+      if (!sc || !sc.ht || !sc.at) continue;        // teams not decided yet
+      if (sc.h !== '' && sc.a !== '') continue;      // already has a score
+      const hit = liveLookup(sc.ht, sc.at);
+      if (!hit) continue;
+      const hs = String(hit.flip ? hit.ev.intAwayScore : hit.ev.intHomeScore);
+      const as = String(hit.flip ? hit.ev.intHomeScore : hit.ev.intAwayScore);
+      setKOScore(key, 'h', hs, sc.ht, sc.at);
+      setKOScore(key, 'a', as, sc.ht, sc.at);
+      if (hs === as) pens++;                 // level after normal time -> penalties
+      filled++;
+    }
+  });
+  renderKnockout();
+  return { filled, pens };
+}
+
+// Real results found online whose pairing isn't represented anywhere in the
+// entered scores (third-place seeding differences, penalty shootouts, etc.).
+function liveUnplaced(){
+  const rep = new Set();
+  Object.keys(MC_GROUP_MATCHES).forEach(g => MC_GROUP_MATCHES[g].forEach((m, idx) => {
+    const sc = state.scores[g + '_' + idx];
+    if (sc && sc.h !== '' && sc.a !== '' && TSDB_NAME[m.h] && TSDB_NAME[m.a]) rep.add(livePairKey(TSDB_NAME[m.h], TSDB_NAME[m.a]));
+  }));
+  Object.keys(state.koScores).forEach(k => {
+    const sc = state.koScores[k];
+    if (sc && sc.h !== '' && sc.a !== '' && sc.ht && sc.at && TSDB_NAME[sc.ht] && TSDB_NAME[sc.at]) rep.add(livePairKey(TSDB_NAME[sc.ht], TSDB_NAME[sc.at]));
+  });
+  return (liveEvents || []).filter(e => !rep.has(livePairKey(e.strHomeTeam, e.strAwayTeam)));
+}
+
+function showUnplaced(list, g, ko){
+  const old = document.getElementById('live-modal'); if (old) old.remove();
+  const wrap = document.createElement('div'); wrap.id = 'live-modal'; wrap.className = 'lv-overlay';
+  wrap.addEventListener('click', e => { if (e.target === wrap) wrap.remove(); });
+  const rows = list.map(e => `<div class="lv-row" style="cursor:default">
+      <span class="lv-fx">${e.strHomeTeam} <strong style="color:var(--gold)">${e.intHomeScore}–${e.intAwayScore}</strong> ${e.strAwayTeam}</span>
+      <span class="lv-date">${e.dateEvent || ''}</span>
+    </div>`).join('');
+  wrap.innerHTML = `<div class="lv-card">
+    <div class="lv-head">⚠️ Enter these by hand<span class="lv-close" onclick="document.getElementById('live-modal').remove()">✕</span></div>
+    <div class="lv-sub">Applied <strong style="color:var(--text)">${g}</strong> group` + (ko && ko.filled ? ` + <strong style="color:var(--text)">${ko.filled}</strong> knockout` : '') + ` result(s) from the web. The matches below were found online but couldn't be auto-placed — usually third-place seeding or a penalty shootout — so type them into the Groups / Knockout tabs yourself.` + (ko && ko.pens ? ` (${ko.pens} knockout tie(s) went to penalties — set the winner manually.)` : '') + `</div>
+    <div class="lv-list">${rows}</div>
+    <div class="lv-actions"><button class="nav-btn" onclick="document.getElementById('live-modal').remove()">Got it</button></div>
+  </div>`;
+  document.body.appendChild(wrap);
 }
 
 // ═══════════════════════════════════════════════
