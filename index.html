@@ -1378,18 +1378,18 @@ const TSDB_NAME = {  // app id -> ESPN display name
   england:'England', croatia:'Croatia', ghana:'Ghana', panama:'Panama',
 };
 
-let liveFound = null, liveEvents = null, liveByPair = null, liveScan = null;
+let liveFound = null, liveEvents = null, liveByPair = null, liveByPairKO = null, liveScan = null;
 
 function liveNorm(x){ return (x||'').toLowerCase().normalize('NFD').replace(/[^a-z]/g,''); }
 function liveTeamLabel(id){ const t = ALL_TEAMS.find(x => x.id === id); return t ? (t.flag + ' ' + t.name) : id; }
 function tsdbYMD(d){ return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
 function livePairKey(aN,bN){ return [liveNorm(aN), liveNorm(bN)].sort().join('~'); }
-function liveLookup(hId, aId){
+function liveLookup(hId, aId){   // knockout slots match KNOCKOUT games only
   const hN = TSDB_NAME[hId], aN = TSDB_NAME[aId];
-  if (!hN || !aN || !liveByPair) return null;
+  if (!hN || !aN || !liveByPairKO) return null;
   const hn = liveNorm(hN), an = liveNorm(aN);
-  if (liveByPair[hn + '|' + an]) return { ev: liveByPair[hn + '|' + an], flip: false };
-  if (liveByPair[an + '|' + hn]) return { ev: liveByPair[an + '|' + hn], flip: true };
+  if (liveByPairKO[hn + '|' + an]) return { ev: liveByPairKO[hn + '|' + an], flip: false };
+  if (liveByPairKO[an + '|' + hn]) return { ev: liveByPairKO[an + '|' + hn], flip: true };
   return null;
 }
 
@@ -1427,7 +1427,8 @@ async function fetchLiveScores(){
               idEvent: ev.id,
               strHomeTeam: home.team.displayName, strAwayTeam: away.team.displayName,
               intHomeScore: String(home.score),   intAwayScore: String(away.score),
-              dateEvent: (ev.date || '').slice(0,10), live: st === 'in'
+              dateEvent: (ev.date || '').slice(0,10), live: st === 'in',
+              stage: (ev.season && ev.season.slug) || ''
             };
           });
           okDays++;
@@ -1438,9 +1439,13 @@ async function fetchLiveScores(){
     if (okDays === 0) throw new Error('could not reach the source');
     const events = Object.values(seen).filter(e =>
       e.intHomeScore != null && e.intHomeScore !== '' && e.intAwayScore != null && e.intAwayScore !== '');
-    const byPair = {};
-    events.forEach(e => { byPair[liveNorm(e.strHomeTeam) + '|' + liveNorm(e.strAwayTeam)] = e; });
-    liveEvents = events; liveByPair = byPair;
+    const byPair = {}, byPairKO = {};
+    events.forEach(e => {
+      const key = liveNorm(e.strHomeTeam) + '|' + liveNorm(e.strAwayTeam);
+      if (e.stage === 'group-stage') byPair[key] = e;       // group results only
+      else if (e.stage) byPairKO[key] = e;                  // knockout results only
+    });
+    liveEvents = events; liveByPair = byPair; liveByPairKO = byPairKO;
     liveScan = { from: dates[0], to: dates[dates.length-1], days: dates.length, total: events.length };
 
     const rows = [];
