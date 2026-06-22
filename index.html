@@ -248,6 +248,58 @@ body { background: var(--navy); color: var(--text); font-family: 'DM Sans', sans
 .lv-date { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--dim); }
 .lv-empty { padding: 20px 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 .lv-actions { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ── MOBILE ─────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  body { -webkit-text-size-adjust: 100%; }
+  .app-content { padding: 14px 12px; }
+  #draft-screen { padding: 14px 12px; }
+
+  /* Nav wraps: logo + action buttons on top, tabs scroll on their own row */
+  .app-nav { flex-wrap: wrap; padding: 0 12px; column-gap: 8px; }
+  .app-nav-logo { font-size: 20px; margin-right: 10px; padding: 13px 0; }
+  .nav-tabs { order: 5; flex-basis: 100%; }
+  .nav-tab { padding: 12px 14px; font-size: 12px; }
+  .nav-btn-group { margin-left: auto; flex-wrap: wrap; gap: 6px; padding: 6px 0; }
+  .nav-btn { font-size: 11px; padding: 7px 10px; }
+
+  .section-header h2 { font-size: 26px; }
+  .section-header p { font-size: 12px; }
+  .draft-header h1 { font-size: 24px; }
+
+  /* One column lists */
+  .leaderboard-grid { grid-template-columns: 1fr; gap: 12px; }
+  .draft-groups-grid { grid-template-columns: 1fr; }
+  .mc-grid-auto { grid-template-columns: 1fr; }
+  #mc-prob-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 8px !important; }
+
+  /* Group tables + bigger, zoom-proof score inputs */
+  .group-card-header { padding: 9px 12px; }
+  .group-table th, .group-table td { padding: 6px 7px; }
+  .match-row { padding: 8px; gap: 6px; }
+  .match-team { font-size: 11px; }
+  .score-input { width: 40px; height: 36px; font-size: 16px; }
+
+  /* Knockout keeps horizontal scroll, smoother on touch */
+  .knockout-wrapper { -webkit-overflow-scrolling: touch; }
+  .knockout-grid { min-width: 760px; }
+
+  /* Intro / points card */
+  .points-card { padding: 24px 18px; }
+  .points-card-header h1 { font-size: 30px; }
+  .pts-table td { padding: 9px 8px; font-size: 13px; }
+  .upset-note { font-size: 11px; }
+
+  /* Modals fit the screen */
+  .lv-card { width: 96vw; }
+  .lv-head { font-size: 20px; padding: 14px 16px; }
+  .lv-sub, .lv-list { padding-left: 16px; padding-right: 16px; }
+}
+@media (max-width: 380px) {
+  .app-nav-logo { font-size: 18px; }
+  .nav-btn { font-size: 10px; padding: 6px 8px; }
+  .nav-tab { padding: 11px 11px; }
+}
 </style>
 </head>
 <body>
@@ -1311,18 +1363,18 @@ const TSDB_WC_LEAGUE = '4429';        // FIFA World Cup
 const TSDB_SEASON = '2026';
 const TSDB_START = '2026-06-11';   // tournament first match
 const TSDB_END   = '2026-07-19';   // final
-const TSDB_NAME = {
-  mexico:'Mexico', czechia:'Czech Republic', korea:'South Korea', southafrica:'South Africa',
+const TSDB_NAME = {  // app id -> ESPN display name
+  mexico:'Mexico', czechia:'Czechia', korea:'South Korea', southafrica:'South Africa',
   switzerland:'Switzerland', canada:'Canada', qatar:'Qatar', bosnia:'Bosnia-Herzegovina',
   brazil:'Brazil', morocco:'Morocco', scotland:'Scotland', haiti:'Haiti',
-  turkey:'Turkey', usa:'USA', australia:'Australia', paraguay:'Paraguay',
-  germany:'Germany', ecuador:'Ecuador', cotedivoire:'Ivory Coast', curacao:'Curacao',
+  turkey:'T\u00fcrkiye', usa:'United States', australia:'Australia', paraguay:'Paraguay',
+  germany:'Germany', ecuador:'Ecuador', cotedivoire:'Ivory Coast', curacao:'Cura\u00e7ao',
   netherlands:'Netherlands', japan:'Japan', sweden:'Sweden', tunisia:'Tunisia',
   belgium:'Belgium', iran:'Iran', egypt:'Egypt', newzealand:'New Zealand',
   spain:'Spain', uruguay:'Uruguay', saudiarabia:'Saudi Arabia', caboverde:'Cape Verde',
   france:'France', senegal:'Senegal', norway:'Norway', iraq:'Iraq',
   argentina:'Argentina', austria:'Austria', algeria:'Algeria', jordan:'Jordan',
-  portugal:'Portugal', colombia:'Colombia', drcongo:'DR Congo', uzbekistan:'Uzbekistan',
+  portugal:'Portugal', colombia:'Colombia', drcongo:'Congo DR', uzbekistan:'Uzbekistan',
   england:'England', croatia:'Croatia', ghana:'Ghana', panama:'Panama',
 };
 
@@ -1361,10 +1413,27 @@ async function fetchLiveScores(){
     for (let i = 0; i < dates.length; i++) {
       if (btn) btn.textContent = `⏳ ${i + 1}/${dates.length}`;
       try {
-        const r = await fetch(`https://www.thesportsdb.com/api/v1/json/${TSDB_KEY}/eventsday.php?d=${dates[i]}&l=${TSDB_WC_LEAGUE}`);
-        if (r.ok) { const j = await r.json(); (j.events || []).forEach(e => { seen[e.idEvent] = e; }); okDays++; }
+        const r = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=${dates[i].replace(/-/g,'')}`);
+        if (r.ok) {
+          const j = await r.json();
+          (j.events || []).forEach(ev => {
+            const st = ev.status && ev.status.type && ev.status.type.state;     // 'pre' | 'in' | 'post'
+            if (st !== 'post' && st !== 'in') return;                            // skip not-yet-played
+            const comp = ev.competitions && ev.competitions[0];
+            const home = comp && (comp.competitors || []).find(c => c.homeAway === 'home');
+            const away = comp && (comp.competitors || []).find(c => c.homeAway === 'away');
+            if (!home || !away || home.score == null || away.score == null) return;
+            seen[ev.id] = {
+              idEvent: ev.id,
+              strHomeTeam: home.team.displayName, strAwayTeam: away.team.displayName,
+              intHomeScore: String(home.score),   intAwayScore: String(away.score),
+              dateEvent: (ev.date || '').slice(0,10), live: st === 'in'
+            };
+          });
+          okDays++;
+        }
       } catch(e) { /* skip this day, keep going */ }
-      await new Promise(res => setTimeout(res, 80));    // gentle on the free API
+      await new Promise(res => setTimeout(res, 60));
     }
     if (okDays === 0) throw new Error('could not reach the source');
     const events = Object.values(seen).filter(e =>
@@ -1385,7 +1454,7 @@ async function fetchLiveScores(){
       rows.push({ key: g + '_' + idx, h: m.h, a: m.a,
         hs: String(flip ? ev.intAwayScore : ev.intHomeScore),
         as: String(flip ? ev.intHomeScore : ev.intAwayScore),
-        date: ev.dateEvent });
+        date: ev.dateEvent, live: !!ev.live });
     }));
     liveFound = rows;
     showLivePreview(rows);
@@ -1407,7 +1476,7 @@ function showLivePreview(rows){
     ? rows.map((r,i) => `<label class="lv-row">
         <input type="checkbox" class="lv-cb" data-i="${i}" checked>
         <span class="lv-fx">${liveTeamLabel(r.h)} <strong style="color:var(--gold)">${r.hs}–${r.as}</strong> ${liveTeamLabel(r.a)}</span>
-        <span class="lv-date">${r.date || ''}</span>
+        <span class="lv-date">${r.live ? '\uD83D\uDD34 LIVE' : (r.date || '')}</span>
       </label>`).join('')
     : `<div class="lv-empty">No published World Cup results match your fixtures yet.${totalEvents ? ` The source currently has ${totalEvents} result${totalEvents>1?'s':''} live, and updates as more matches are entered.` : ' The source has no results entered yet — check back after more matches are played.'}</div>`;
   wrap.innerHTML = `<div class="lv-card">
@@ -1443,7 +1512,10 @@ function applyLiveSelected(){
   showTab('groups');
   if (unplaced.length) { showUnplaced(unplaced, g, ko); }
   else {
+    const groupFilled = Object.keys(MC_GROUP_MATCHES).reduce((n, gg) =>
+      n + MC_GROUP_MATCHES[gg].filter((_, i) => { const sc = state.scores[gg + '_' + i]; return sc && sc.h !== '' && sc.a !== ''; }).length, 0);
     alert(`Applied ${g} group result${g===1?'':'s'}` + (ko.filled ? ` + ${ko.filled} knockout` : '') + ' from the web.'
+      + `\n\n${groupFilled} of 72 group games are in. Blank fixtures are matches that haven't been played yet \u2014 press Live again once they're played and they'll fill in.`
       + (ko.pens ? `\n\n${ko.pens} knockout tie(s) went to penalties \u2014 set the winner by hand in the Knockout tab.` : '')
       + '\n\nEdit any score by hand if you need to.');
   }
@@ -1462,7 +1534,7 @@ function fillKnockoutFromWeb(){
       if (!sc || !sc.ht || !sc.at) continue;        // teams not decided yet
       if (sc.h !== '' && sc.a !== '') continue;      // already has a score
       const hit = liveLookup(sc.ht, sc.at);
-      if (!hit) continue;
+      if (!hit || hit.ev.live) continue;   // only final results advance the bracket
       const hs = String(hit.flip ? hit.ev.intAwayScore : hit.ev.intHomeScore);
       const as = String(hit.flip ? hit.ev.intHomeScore : hit.ev.intAwayScore);
       setKOScore(key, 'h', hs, sc.ht, sc.at);
