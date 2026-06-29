@@ -746,6 +746,15 @@ function computeGroupStandings() {
   return standings;
 }
 
+// Decisive winner of a KO match, honoring a penalty-shootout pick on a level score.
+function koWinnerOf(sc) {
+  if (!sc || sc.h === '' || sc.a === '') return null;
+  const hs = parseInt(sc.h), as = parseInt(sc.a);
+  if (isNaN(hs) || isNaN(as)) return null;
+  if (hs === as) return (sc.pen === sc.ht || sc.pen === sc.at) ? sc.pen : null;
+  return hs > as ? sc.ht : sc.at;
+}
+
 function getTeamStage(teamId, standings) {
   // ── Step 1: group stage position ──
   let teamPos = null;
@@ -777,14 +786,7 @@ function getTeamStage(teamId, standings) {
     });
   }
   function wonAll(keys) {
-    return keys.every(k => {
-      const sc = state.koScores[k];
-      if (!sc || sc.h === '' || sc.a === '') return false;
-      const hs = parseInt(sc.h), as = parseInt(sc.a);
-      if (isNaN(hs) || isNaN(as) || hs === as) return false;
-      const winner = hs > as ? sc.ht : sc.at;
-      return winner === teamId;
-    });
+    return keys.every(k => koWinnerOf(state.koScores[k]) === teamId);
   }
 
   const r32Keys  = Array.from({length:16}, (_,i) => `r32_${i}`);
@@ -799,15 +801,8 @@ function getTeamStage(teamId, standings) {
   });
   if (!myR32) return 'r32'; // qualified from groups, not yet played R32
 
-  // Check if they won R32
-  const wonR32 = (() => {
-    const sc = state.koScores[myR32];
-    if (!sc || sc.h === '' || sc.a === '') return false;
-    const hs = parseInt(sc.h), as = parseInt(sc.a);
-    if (isNaN(hs) || isNaN(as) || hs === as) return false;
-    return (hs > as ? sc.ht : sc.at) === teamId;
-  })();
-  if (!wonR32) return 'r32';
+  // Won R32? (penalties count)
+  if (koWinnerOf(state.koScores[myR32]) !== teamId) return 'r32';
 
   // Check R16
   const myR16 = r16Keys.find(k => {
@@ -815,14 +810,7 @@ function getTeamStage(teamId, standings) {
     return sc && (sc.ht === teamId || sc.at === teamId);
   });
   if (!myR16) return 'r16';
-  const wonR16 = (() => {
-    const sc = state.koScores[myR16];
-    if (!sc || sc.h === '' || sc.a === '') return false;
-    const hs = parseInt(sc.h), as = parseInt(sc.a);
-    if (isNaN(hs) || isNaN(as) || hs === as) return false;
-    return (hs > as ? sc.ht : sc.at) === teamId;
-  })();
-  if (!wonR16) return 'r16';
+  if (koWinnerOf(state.koScores[myR16]) !== teamId) return 'r16';
 
   // Check QF
   const myQF = qfKeys.find(k => {
@@ -830,14 +818,7 @@ function getTeamStage(teamId, standings) {
     return sc && (sc.ht === teamId || sc.at === teamId);
   });
   if (!myQF) return 'qf';
-  const wonQF = (() => {
-    const sc = state.koScores[myQF];
-    if (!sc || sc.h === '' || sc.a === '') return false;
-    const hs = parseInt(sc.h), as = parseInt(sc.a);
-    if (isNaN(hs) || isNaN(as) || hs === as) return false;
-    return (hs > as ? sc.ht : sc.at) === teamId;
-  })();
-  if (!wonQF) return 'qf';
+  if (koWinnerOf(state.koScores[myQF]) !== teamId) return 'qf';
 
   // Check SF
   const mySF = sfKeys.find(k => {
@@ -845,21 +826,11 @@ function getTeamStage(teamId, standings) {
     return sc && (sc.ht === teamId || sc.at === teamId);
   });
   if (!mySF) return 'sf';
-  const wonSF = (() => {
-    const sc = state.koScores[mySF];
-    if (!sc || sc.h === '' || sc.a === '') return false;
-    const hs = parseInt(sc.h), as = parseInt(sc.a);
-    if (isNaN(hs) || isNaN(as) || hs === as) return false;
-    return (hs > as ? sc.ht : sc.at) === teamId;
-  })();
-  if (!wonSF) return 'sf';
+  if (koWinnerOf(state.koScores[mySF]) !== teamId) return 'sf';
 
-  // Check Final
-  const finalSc = state.koScores['final_0'];
-  if (!finalSc || finalSc.h === '' || finalSc.a === '') return 'ru'; // in final, no result yet
-  const fhs = parseInt(finalSc.h), fas = parseInt(finalSc.a);
-  if (isNaN(fhs) || isNaN(fas) || fhs === fas) return 'ru';
-  const finalWinner = fhs > fas ? finalSc.ht : finalSc.at;
+  // Check Final (penalties count)
+  const finalWinner = koWinnerOf(state.koScores['final_0']);
+  if (!finalWinner) return 'ru'; // in final, no decisive result yet
   return finalWinner === teamId ? 'winner' : 'ru';
 }
 
@@ -869,10 +840,9 @@ function computeUpsetWins() {
   const upsets = {};
   Object.entries(state.koScores).forEach(([key, sc]) => {
     if (!sc.ht || !sc.at) return;
-    const hs = parseInt(sc.h), as = parseInt(sc.a);
-    if (isNaN(hs) || isNaN(as) || sc.h === '' || sc.a === '' || hs === as) return;
-    const winner = hs > as ? sc.ht : sc.at;
-    const loser  = hs > as ? sc.at : sc.ht;
+    const winner = koWinnerOf(sc);
+    if (!winner) return;
+    const loser = winner === sc.ht ? sc.at : sc.ht;
     if (isQualifyingUpset(winner, loser)) {
       upsets[winner] = (upsets[winner] || 0) + 1;
     }
