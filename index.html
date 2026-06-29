@@ -457,7 +457,7 @@ const ALL_TEAMS = [
   {id:'qatar',name:'Qatar',flag:'🇶🇦',group:'B'},
   {id:'brazil',name:'Brazil',flag:'🇧🇷',group:'C'},
   {id:'morocco',name:'Morocco',flag:'🇲🇦',group:'C'},
-  {id:'scotland',name:'Scotland',flag:'🏴󠁧󠁢󠁳󠁣󠁴󠁿',group:'C'},
+  {id:'scotland',name:'Scotland',flag:'🇬🇧',group:'C'},
   {id:'haiti',name:'Haiti',flag:'🇭🇹',group:'C'},
   {id:'turkey',name:'Türkiye',flag:'🇹🇷',group:'D'},
   {id:'usa',name:'USA',flag:'🇺🇸',group:'D'},
@@ -491,7 +491,7 @@ const ALL_TEAMS = [
   {id:'colombia',name:'Colombia',flag:'🇨🇴',group:'K'},
   {id:'uzbekistan',name:'Uzbekistan',flag:'🇺🇿',group:'K'},
   {id:'drcongo',name:'DR Congo',flag:'🇨🇩',group:'K'},
-  {id:'england',name:'England',flag:'🏴󠁧󠁢󠁥󠁮󠁧󠁿',group:'L'},
+  {id:'england',name:'England',flag:'🇬🇧',group:'L'},
   {id:'ghana',name:'Ghana',flag:'🇬🇭',group:'L'},
   {id:'croatia',name:'Croatia',flag:'🇭🇷',group:'L'},
   {id:'panama',name:'Panama',flag:'🇵🇦',group:'L'},
@@ -1086,6 +1086,19 @@ function renderKnockout() {
   })).sort((a,b) => b.pts-a.pts || b.gd-a.gd || b.gf-a.gf);
   const t = allThirds.slice(0, 8).map(x => x.teamId); // best 8 thirds
 
+  // ── Official FIFA third-place allocation (regulations Annex C) ────────────
+  // Which group's 3rd faces each winner depends on WHICH eight groups produce
+  // the best thirds, not their rank order. Real WC2026 combo = B,D,E,F,I,J,K,L.
+  const groupOf = id => (getTeam(id) || {}).group;
+  const thirdByGroup = {};
+  'ABCDEFGHIJKL'.split('').forEach(g => { thirdByGroup[g] = standings[g][2]?.teamId; });
+  const qualGroups = allThirds.slice(0, 8).map(x => groupOf(x.teamId)).filter(Boolean).sort().join('');
+  const THIRD_ALLOC = {
+    'BDEFIJKL': { A:'E', B:'J', D:'B', E:'D', G:'I', I:'F', K:'L', L:'K' },
+  };
+  const alloc = THIRD_ALLOC[qualGroups] || null;
+  const T3 = (wg, i) => (alloc ? thirdByGroup[alloc[wg]] : t[i]);
+
   // ── 2. R32 — FROM OFFICIAL BRACKET IMAGE ─────────────────────────────────────
   // SF1 → Dallas SF: Spain(1H) + France(1I) both here — can meet in SF
   // SF2 → Atlanta SF: England(1L) + Argentina(1J) both here — can meet in SF
@@ -1101,23 +1114,23 @@ function renderKnockout() {
   //                            (8,9)→M91, (10,11)→M92, (12,13)→M95, (14,15)→M96 [SF2]
   const R32_SEEDS = [
     // ── SF1 HALF → Dallas (Spain + France) ──
-    [w['E'],   t[0]   ],   //  0: M74 — 1E vs 3rd
-    [w['I'],   t[1]   ],   //  1: M77 — 1I vs 3rd        ← FRANCE
-    [ru['A'],  ru['B']],   //  2: M73 — 2A vs 2B
-    [w['F'],   ru['C']],   //  3: M75 — 1F vs 2C
-    [w['H'],   ru['J']],   //  4: M83 — 1H vs 2J         ← SPAIN
-    [ru['K'],  ru['L']],   //  5: M84 — 2K vs 2L
-    [w['D'],   t[2]   ],   //  6: M81 — 1D vs 3rd
-    [w['G'],   t[3]   ],   //  7: M82 — 1G vs 3rd
+    [w['E'],   T3('E',0)],   //  0: 1E vs 3rd D  (Germany vs Paraguay)
+    [w['I'],   T3('I',1)],   //  1: 1I vs 3rd F  (France vs Sweden)
+    [ru['A'],  ru['B']  ],   //  2: 2A vs 2B
+    [w['F'],   ru['C']  ],   //  3: 1F vs 2C  (Netherlands vs Morocco)
+    [w['H'],   ru['J']  ],   //  4: 1H vs 2J  (Spain vs Austria)
+    [ru['K'],  ru['L']  ],   //  5: 2K vs 2L  (Portugal vs Croatia)
+    [w['D'],   T3('D',2)],   //  6: 1D vs 3rd B  (USA vs Bosnia)
+    [w['G'],   T3('G',3)],   //  7: 1G vs 3rd I  (Belgium vs Senegal)
     // ── SF2 HALF → Atlanta (England + Argentina) ──
-    [w['C'],   ru['F']],   //  8: M76 — 1C vs 2F
-    [ru['E'],  ru['I']],   //  9: M78 — 2E vs 2I
-    [w['A'],   t[4]   ],   // 10: M79 — 1A vs 3rd
-    [w['L'],   t[5]   ],   // 11: M80 — 1L vs 3rd        ← ENGLAND
-    [w['J'],   ru['H']],   // 12: M86 — 1J vs 2H         ← ARGENTINA
-    [ru['D'],  ru['G']],   // 13: M88 — 2D vs 2G
-    [w['B'],   t[6]   ],   // 14: M85 — 1B vs 3rd
-    [w['K'],   t[7]   ],   // 15: M87 — 1K vs 3rd
+    [w['C'],   ru['F']  ],   //  8: 1C vs 2F  (Brazil vs Japan)
+    [ru['E'],  ru['I']  ],   //  9: 2E vs 2I  (Ivory Coast vs Norway)
+    [w['A'],   T3('A',4)],   // 10: 1A vs 3rd E  (Mexico vs Ecuador)
+    [w['L'],   T3('L',5)],   // 11: 1L vs 3rd K  (England vs DR Congo)
+    [w['J'],   ru['H']  ],   // 12: 1J vs 2H  (Argentina vs Cabo Verde)
+    [ru['D'],  ru['G']  ],   // 13: 2D vs 2G  (Australia vs Egypt)
+    [w['B'],   T3('B',6)],   // 14: 1B vs 3rd J  (Switzerland vs Algeria)
+    [w['K'],   T3('K',7)],   // 15: 1K vs 3rd L  (Colombia vs Ghana)
   ];
 
   // ── 3. Helper: get the winner of a stored ko match ───────────────────────
@@ -1793,6 +1806,11 @@ function mcRunSim() {
   })).sort((a,b) => b.pts-a.pts || b.gd-a.gd || b.gf-a.gf);
   const t = thirds.slice(0,8).map(x => x.id);
   const elim3 = thirds.slice(8).map(x => x.id);
+  const thirdByGroup = {}; GROUPS.forEach(g => { thirdByGroup[g] = gr[g][2].id; });
+  const qualGroups = thirds.slice(0,8).map(x => MC_GROUP_OF[x.id]).filter(Boolean).sort().join('');
+  const THIRD_ALLOC = { 'BDEFIJKL': { A:'E', B:'J', D:'B', E:'D', G:'I', I:'F', K:'L', L:'K' } };
+  const alloc = THIRD_ALLOC[qualGroups] || null;
+  const T3 = (wg, i) => (alloc ? thirdByGroup[alloc[wg]] : t[i]);
 
   const stage = {};
   Object.keys(MC_GROUP_OF).forEach(id => { stage[id] = 'group'; });
@@ -1805,10 +1823,10 @@ function mcRunSim() {
   GROUPS.forEach(g => { w[g] = gr[g][0].id; ru2[g] = gr[g][1].id; });
 
   const r32p = [
-    [w['E'],t[0]], [w['I'],t[1]], [ru2['A'],ru2['B']], [w['F'],ru2['C']],
-    [w['H'],ru2['J']], [ru2['K'],ru2['L']], [w['D'],t[2]], [w['G'],t[3]],
-    [w['C'],ru2['F']], [ru2['E'],ru2['I']], [w['A'],t[4]], [w['L'],t[5]],
-    [w['J'],ru2['H']], [ru2['D'],ru2['G']], [w['B'],t[6]], [w['K'],t[7]],
+    [w['E'],T3('E',0)], [w['I'],T3('I',1)], [ru2['A'],ru2['B']], [w['F'],ru2['C']],
+    [w['H'],ru2['J']], [ru2['K'],ru2['L']], [w['D'],T3('D',2)], [w['G'],T3('G',3)],
+    [w['C'],ru2['F']], [ru2['E'],ru2['I']], [w['A'],T3('A',4)], [w['L'],T3('L',5)],
+    [w['J'],ru2['H']], [ru2['D'],ru2['G']], [w['B'],T3('B',6)], [w['K'],T3('K',7)],
   ];
 
   // KO match: use real result if entered, otherwise simulate
