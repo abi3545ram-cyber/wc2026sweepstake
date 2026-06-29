@@ -300,6 +300,11 @@ body { background: var(--navy); color: var(--text); font-family: 'DM Sans', sans
   .nav-btn { font-size: 10px; padding: 6px 8px; }
   .nav-tab { padding: 11px 11px; }
 }
+.ko-pens { display:flex; align-items:center; gap:5px; padding:5px 6px 3px; border-top:1px dashed var(--border); margin-top:3px; }
+.ko-pens-label { font-family:'Space Mono',monospace; font-size:8px; color:var(--muted); letter-spacing:1px; }
+.ko-pen-btn { background:var(--card2); border:1px solid var(--border); border-radius:5px; cursor:pointer; font-size:14px; line-height:1; padding:3px 7px; }
+.ko-pen-btn.sel { border-color:var(--gold); background:rgba(245,200,66,0.18); box-shadow:0 0 0 1px var(--gold) inset; }
+.ko-pen-btn:hover { border-color:var(--gold); }
 </style>
 </head>
 <body>
@@ -1138,7 +1143,8 @@ function renderKnockout() {
     const sc = state.koScores[key];
     if (!sc || sc.h === '' || sc.a === '') return null;
     const hs = parseInt(sc.h), as = parseInt(sc.a);
-    if (isNaN(hs) || isNaN(as) || hs === as) return null; // draw = no winner yet
+    if (isNaN(hs) || isNaN(as)) return null;
+    if (hs === as) return (sc.pen === sc.ht || sc.pen === sc.at) ? sc.pen : null; // draw -> chosen penalty winner
     return hs > as ? sc.ht : sc.at;
   }
 
@@ -1190,8 +1196,10 @@ function renderKnockout() {
     const sc    = state.koScores[key] || {h:'',a:''};
     const hs    = parseInt(sc.h), as = parseInt(sc.a);
     const hasResult = sc.h !== '' && sc.a !== '' && !isNaN(hs) && !isNaN(as);
-    const hWins = hasResult && hs > as;
-    const aWins = hasResult && as > hs;
+    const isDraw = hasResult && hs === as;
+    const penWinner = isDraw && (sc.pen === hId || sc.pen === aId) ? sc.pen : null;
+    const hWins = hasResult && (hs > as || penWinner === hId);
+    const aWins = hasResult && (as > hs || penWinner === aId);
     const isUpset = hasResult && (
       (hWins && isQualifyingUpset(hId, aId)) ||
       (aWins && isQualifyingUpset(aId, hId))
@@ -1223,6 +1231,11 @@ function renderKnockout() {
     return `<div class="ko-match">
       ${teamRow(hId, sc.h||'', hWins, 'h')}
       ${teamRow(aId, sc.a||'', aWins, 'a')}
+      ${isDraw ? `<div class="ko-pens">
+        <span class="ko-pens-label">PENS</span>
+        <button class="ko-pen-btn ${penWinner===hId?'sel':''}" title="${(getTeam(hId)||{}).name||''} win on penalties" onclick="setKOPen('${key}','${hId||''}')">${(getTeam(hId)||{}).flag||'\uD83C\uDFF3'}</button>
+        <button class="ko-pen-btn ${penWinner===aId?'sel':''}" title="${(getTeam(aId)||{}).name||''} win on penalties" onclick="setKOPen('${key}','${aId||''}')">${(getTeam(aId)||{}).flag||'\uD83C\uDFF3'}</button>
+      </div>` : ''}
     </div>`;
   }
 
@@ -1616,6 +1629,15 @@ function setKOScore(key, side, val, htId, atId) {
   debounceRender();
 }
 
+// Pick the penalty-shootout winner for a level knockout tie (click again to clear).
+function setKOPen(key, teamId) {
+  if (!state.koScores[key] || !teamId) return;
+  state.koScores[key].pen = (state.koScores[key].pen === teamId) ? '' : teamId;
+  saveScores();
+  renderKnockout();
+  renderLeaderboard();
+}
+
 let renderTimer = null;
 function debounceRender() {
   clearTimeout(renderTimer);
@@ -1762,7 +1784,8 @@ function getRealKOResult(key) {
   const sc = REAL.koScores[key];
   if (!sc || sc.h === '' || sc.a === '') return null;
   const hs = parseInt(sc.h), as = parseInt(sc.a);
-  if (isNaN(hs) || isNaN(as) || hs === as) return null;
+  if (isNaN(hs) || isNaN(as)) return null;
+  if (hs === as) return (sc.pen === sc.ht || sc.pen === sc.at) ? sc.pen : null;
   return hs > as ? sc.ht : sc.at;
 }
 
